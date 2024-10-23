@@ -7,7 +7,6 @@
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 #region functions
-
 function Resolve-KPN-Mobile-ServicesError {
     [CmdletBinding()]
     param (
@@ -72,7 +71,7 @@ try {
 
     Write-Information 'Setting authorization header'
     $headers = [System.Collections.Generic.Dictionary[string, string]]::new()
-    $headers.Add('Authorization', "Bearer $($accessToken)14514")
+    $headers.Add('Authorization', "Bearer $($accessToken)")
 
     # Validate correlation configuration
     if ($actionContext.CorrelationConfiguration.Enabled) {

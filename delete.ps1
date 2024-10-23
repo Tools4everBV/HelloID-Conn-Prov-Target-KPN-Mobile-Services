@@ -34,8 +34,13 @@ function Resolve-KPN-Mobile-ServicesError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             # Make sure to inspect the error result object and add only the error message as a FriendlyMessage.
-            # $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-            $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails # Temporarily assignment
+            if ($errorDetailsObject.errors.count -gt 0) {
+                $httpErrorObj.FriendlyMessage = ($errorDetailsObject.errors -join ', ')
+            } elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
+                $httpErrorObj.FriendlyMessage = $errorDetailsObject.fault.faultstring
+            } else {
+                $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
+            }
         } catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
         }
@@ -70,7 +75,6 @@ try {
     Write-Information 'Setting authorization header'
     $headers = [System.Collections.Generic.Dictionary[string, string]]::new()
     $headers.Add('Authorization', "Bearer $($accessToken)")
-    $headers.Add('content', "Bearer $($accessToken)")
 
     Write-Information 'Verifying if a KPN-Mobile-Services account exists'
     $splatGetUser = @{

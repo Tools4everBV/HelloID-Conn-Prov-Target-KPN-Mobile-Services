@@ -75,7 +75,6 @@ try {
     Write-Information 'Setting authorization header'
     $headers = [System.Collections.Generic.Dictionary[string, string]]::new()
     $headers.Add('Authorization', "Bearer $($accessToken)")
-    $headers.Add('content', "Bearer $($accessToken)")
 
     Write-Information 'Verifying if a KPN-Mobile-Services account exists'
     $splatGetUser = @{
