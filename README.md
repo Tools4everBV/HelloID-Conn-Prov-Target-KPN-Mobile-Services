@@ -105,7 +105,10 @@ The following settings are required to connect to the API.
 > _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems.html) pages_.
 
 > [!TIP]
->  _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com)_.
+>  _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com/forum/helloid-connectors/provisioning/5278-helloid-provisioning-target-kpn-mobile-services)_.
+
+> [!TIP]
+>  _For more information about the KPN mobile services API, please refer to [swagger](https://app.swaggerhub.com/apis-docs/kpn/MobileServicesManagement-KPN/v11)_.
 
 ## HelloID docs
 
