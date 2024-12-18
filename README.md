@@ -64,6 +64,9 @@ To properly setup the correlation:
     | Person correlation field  | `PersonContext.Person.ExternalId` |
     | Account correlation field | `EmployeeNumber`                  |
 
+> [!NOTE]
+> The possible properties to use with the filter are: `FIRSTNAME, LASTNAME, SURNAME_PREFIX, CONTRACTS, DEBTORNAME, FIXED_NUMBER, EMPLOYEE_NUMBER.` If you want to use a different correlation property instead of `EMPLOYEE_NUMBER`, you can change the filter in the get request inside the `create.ps1` script. Keep in mind that the property needs to be in capital letters. For more information see the API documentation.
+
 > [!TIP]
 > _For more information on correlation, please refer to our correlation [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems/correlation.html) pages_.
 
@@ -86,13 +89,13 @@ The following settings are required to connect to the API.
 - Costcenter property on the contract needs to have an value 
 
 ### Remarks
-- Because the API request to retrieve all subscribers typically only returns the first 20 results, you can add a filter that works with "from" and "to" parameters. As a result, the process uses two GET calls to retrieve all existing subscribers. The first call retrieves a single subscriber and the total number of subscribers in the target system, while the second call fetches all subscribers from 0 up to the total count.
-
 - The "get children" API request works similarly to the "get subscribers" request, which is why there are two GET calls for subscribers in both the create and update scripts.
 
 - The body of the "update subscriber" API call requires all properties that are set in the "create" action lifecycle. If any properties are missing in the body, they will reset to their default values (e.g., strings will become empty, and integers will become null).
 
 - The field mapping uses the "subscriber." for most properties. This is because the body in the create request expects certain properties at the same level as the "subscriber." property, which contains the subscriber model.
+
+- The property GroupId gets mapped to none in the fieldmapping because this is mapped in the code. The groupId is filled with the value of the internal ID of a cost center. We retrieve the cost center based on the cost center number in the field mapping.
 
 
 ## Setup the connector

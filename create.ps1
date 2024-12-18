@@ -76,7 +76,7 @@ try {
     # Validate correlation configuration
     if ($actionContext.CorrelationConfiguration.Enabled) {
         # remove subscriber. from accountfield
-        $correlationField = ($actionContext.CorrelationConfiguration.AccountField -split '\.')[1]
+        $correlationField = ($actionContext.CorrelationConfiguration.AccountField -split '\.')[-1]
         $correlationValue = $actionContext.CorrelationConfiguration.PersonFieldValue
 
         if ([string]::IsNullOrEmpty($($correlationField))) {
@@ -86,22 +86,12 @@ try {
             throw 'Correlation is enabled but [accountFieldValue] is empty. Please make sure it is correctly mapped'
         }
 
-        # Get one user to see retrieve total users
         $splatGetUsers = @{
-            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?from=0&to=1"
+            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($correlationValue)`""
             Method  = 'GET'
             Headers = $headers
         }
-        $usersTotal = (Invoke-RestMethod @splatGetUsers).total
-
-        # Get users
-        $splatGetUsers = @{
-            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?from=0&to=$($usersTotal)"
-            Method  = 'GET'
-            Headers = $headers
-        }
-        $users = (Invoke-RestMethod @splatGetUsers).result
-        $correlatedAccount = $users | Where-Object { $_.$correlationField -eq $correlationValue }
+        $correlatedAccount = (Invoke-RestMethod @splatGetUsers).result
 
         # Validate costcenter number to costcenter id in KPN-mobile-services
         $splatGetDebtors = @{
@@ -111,7 +101,7 @@ try {
         }
         $debtors = (Invoke-RestMethod @splatGetDebtors).result
 
-        $costCenters = New-Object System.Collections.ArrayList
+        $costCenters = [System.Collections.Generic.list[object]]::new()
         foreach ($debtor in $debtors) {
             $splatTotalCostCenters = @{
                 Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/children?id=$($debtor.id)&from=0&to=1"
@@ -138,7 +128,7 @@ try {
             }
         }
 
-        $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $personContext.Person.PrimaryContract.CostCenter.Code } | Select-Object -ExpandProperty id)
+        $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber } | Select-Object -ExpandProperty id)
     }
 
     if ($null -ne $correlatedAccount) {
@@ -155,7 +145,7 @@ try {
             $splatCreateSubscriber = @{
                 Uri         = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers"
                 Method      = 'POST'
-                Body        = ($actionContext.Data | ConvertTo-Json -Depth 10)
+                Body        = (($actionContext.Data | Select-Object * -ExcludeProperty costCenterNumber) | ConvertTo-Json -Depth 10)
                 Headers     = $headers
                 ContentType = 'application/json'
             }
@@ -167,14 +157,14 @@ try {
 
                 # Wait 5 seconds before getting user because it takes a while for the get call to return a newly created user
                 Start-Sleep -Seconds 5
+
                 # Get users to get created account
                 $splatGetUsers = @{
-                    Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?from=0&to=$($usersTotal +1)"
+                    Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($actionContext.Data.subscriber.employeeNumber)`""
                     Method  = 'GET'
                     Headers = $headers
                 }
-                $users = (Invoke-RestMethod @splatGetUsers).result
-                $createdAccount = $users | Where-Object { $_.employeeNumber -eq $actionContext.Data.subscriber.employeeNumber }
+                $createdAccount = (Invoke-RestMethod @splatGetUsers).result
 
                 $outputContext.Data = $createdAccount
                 $outputContext.AccountReference = $createdAccount.Id
@@ -196,7 +186,7 @@ try {
         }
 
         'CostcenterValidationError' {
-            throw "Could not find costcenter with costcenterNumber [$($personContext.Person.PrimaryContract.CostCenter.Code)]"
+            throw "Could not find costcenter with costcenterNumber [$($actionContext.Data.costCenterNumber)]"
             break
         }
     }

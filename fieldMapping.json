@@ -139,7 +139,7 @@
       ]
     },
     {
-      "Name": "groupId",
+      "Name": "costCenterNumber",
       "Description": "",
       "Type": "Text",
       "MappingActions": [
@@ -150,6 +150,23 @@
           ],
           "MappingMode": "Field",
           "Value": "\"Person.PrimaryContract.CostCenter.Code\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "groupId",
+      "Description": "This property gets mapped to none in the fieldmapping because this is mapped in the code. The groupId is filled with the value of the internal ID of a cost center. We retrieve the cost center based on the cost center number in the field mapping.",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "None",
+          "Value": "\"\"",
           "UsedInNotifications": false,
           "StoreInAccountData": false
         }

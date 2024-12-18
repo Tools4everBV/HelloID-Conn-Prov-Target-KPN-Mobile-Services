@@ -88,11 +88,29 @@ try {
     # Always compare the account against the current account in target system
     $actionList = @()
     if ($null -ne $correlatedAccount) {
+
+        $filteredCorrelatedAccount = $correlatedAccount | Select-Object * -ExcludeProperty path, id, location
+
         $splatCompareProperties = @{
-            ReferenceObject  = @($correlatedAccount.PSObject.Properties)
+            ReferenceObject  = @($filteredCorrelatedAccount.PSObject.Properties)
             DifferenceObject = @($actionContext.Data.subscriber.PSObject.Properties)
         }
-        $propertiesChanged = Compare-Object @splatCompareProperties -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
+        $propertiesChangedObject = Compare-Object @splatCompareProperties -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
+
+        # Takes the subscriber model and adds all the properties that are populated in the target system and adds them to propertiesChanged.
+        # This is needed because the API sets properties to its default value when they are not send with the put request.
+        if ($null -ne $propertiesChangedObject) {
+            $propertiesChanged = @{}
+            $actionContext.Data.subscriber.PSObject.Properties | ForEach-Object { $propertiesChanged[$_.Name] = $_.Value }
+
+            foreach ($property in $filteredCorrelatedAccount.PSObject.Properties) {
+                if (-not ($actionContext.Data.subscriber.PSObject.Properties.Name -contains ($property.Name))) {
+                    if (-not([string]::IsNullOrEmpty($property.Value))) {
+                        $propertiesChanged[$property.Name] = $property.Value
+                    }
+                }
+            }
+        }
 
         $splatGetDebtors = @{
             Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/children"
@@ -101,7 +119,7 @@ try {
         }
         $debtors = (Invoke-RestMethod @splatGetDebtors).result
 
-        $costCenters = New-Object System.Collections.ArrayList
+        $costCenters = [System.Collections.Generic.list[object]]::new()
         foreach ($debtor in $debtors) {
             $splatTotalCostCenters = @{
                 Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/children?id=$($debtor.id)&from=0&to=1"
@@ -127,8 +145,9 @@ try {
             }
         }
 
-        $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $personContext.Person.PrimaryContract.CostCenter.Code } | Select-Object -ExpandProperty id)
-        $targetCostCenterId = ($correlatedAccount.path | Where-Object { $_.type -eq 'COST_CENTER' } | Select-Object -ExpandProperty id)
+        $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber }).id
+        $targetCostCenterId = ($correlatedAccount.path | Where-Object { $_.type -eq 'COST_CENTER' }).id
+        $outputContext.PreviousData.costCenterNumber = ($costCenters | Where-Object { $_.id -eq $targetCostCenterId }).costcenterNumber
 
         if ($actionContext.Data.groupId -ne $targetCostCenterId) {
             $actionList += 'UpdateCostCenter'
@@ -151,7 +170,10 @@ try {
                 $splatUpdateSubscriber = @{
                     Uri         = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers/$($actionContext.References.Account)"
                     Method      = 'PUT'
-                    Body        = ($actionContext.Data | Select-Object * -ExcludeProperty groupId | ConvertTo-Json -Depth 10)
+                    Body        = ([PSCustomObject]@{
+                            referenceNumber = $actionContext.Data.referenceNumber
+                            subscriber      = $propertiesChanged
+                        } | ConvertTo-Json -Depth 10)
                     Headers     = $headers
                     ContentType = 'application/json'
                 }
