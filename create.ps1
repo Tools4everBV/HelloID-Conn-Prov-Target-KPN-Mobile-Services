@@ -23,7 +23,8 @@ function Resolve-KPN-Mobile-ServicesError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -36,12 +37,15 @@ function Resolve-KPN-Mobile-ServicesError {
             # Make sure to inspect the error result object and add only the error message as a FriendlyMessage.
             if ($errorDetailsObject.errors.count -gt 0) {
                 $httpErrorObj.FriendlyMessage = ($errorDetailsObject.errors -join ', ')
-            } elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
+            }
+            elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.fault.faultstring
-            } else {
+            }
+            else {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
             }
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
         }
         Write-Output $httpErrorObj
@@ -75,8 +79,7 @@ try {
 
     # Validate correlation configuration
     if ($actionContext.CorrelationConfiguration.Enabled) {
-        # remove subscriber. from accountfield
-        $correlationField = ($actionContext.CorrelationConfiguration.AccountField -split '\.')[-1]
+        $correlationField = $actionContext.CorrelationConfiguration.AccountField
         $correlationValue = $actionContext.CorrelationConfiguration.PersonFieldValue
 
         if ([string]::IsNullOrEmpty($($correlationField))) {
@@ -92,6 +95,8 @@ try {
             Headers = $headers
         }
         $correlatedAccount = (Invoke-RestMethod @splatGetUsers).result
+ 
+        $correlatedAccount = $correlatedAccount | Where-Object { $_.$correlationField -eq $correlationValue }
 
         # Validate costcenter number to costcenter id in KPN-mobile-services
         $splatGetDebtors = @{
@@ -131,21 +136,33 @@ try {
         $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber } | Select-Object -ExpandProperty id)
     }
 
-    if ($null -ne $correlatedAccount) {
+    if (($correlatedAccount | Measure-Object).count -eq 1) {
         $action = 'CorrelateAccount'
-    } elseif ($null -eq $actionContext.Data.groupId) {
+    }
+    elseif ($null -eq $actionContext.Data.groupId) {
         $action = 'CostcenterValidationError'
-    } else {
+    }
+    elseif (($correlatedAccount | Measure-Object).count -gt 1) {
+        $action = 'MultipleFound'
+    }
+    else {
         $action = 'CreateAccount'
     }
+
+    Write-Information "Calculated action $action"
 
     # Process
     switch ($action) {
         'CreateAccount' {
+            $body = [PSCustomObject]@{
+                subscriber = ($actionContext.Data | Select-Object * -ExcludeProperty id, groupId, costCenterNumber, referenceNumber)
+                groupId    = $actionContext.Data.groupId
+            }
+
             $splatCreateSubscriber = @{
                 Uri         = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers"
                 Method      = 'POST'
-                Body        = (($actionContext.Data | Select-Object * -ExcludeProperty costCenterNumber) | ConvertTo-Json -Depth 10)
+                Body        = ($body | ConvertTo-Json -Depth 10)
                 Headers     = $headers
                 ContentType = 'application/json'
             }
@@ -155,20 +172,25 @@ try {
 
                 $null = Invoke-RestMethod @splatCreateSubscriber
 
-                # Wait 5 seconds before getting user because it takes a while for the get call to return a newly created user
-                Start-Sleep -Seconds 5
+                # Wait 15 seconds before getting user because it takes a while for the get call to return a newly created user
+                Start-Sleep -Seconds 15
 
                 # Get users to get created account
                 $splatGetUsers = @{
-                    Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($actionContext.Data.subscriber.employeeNumber)`""
+                    Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($correlationValue)`""
                     Method  = 'GET'
                     Headers = $headers
                 }
                 $createdAccount = (Invoke-RestMethod @splatGetUsers).result
 
+                if (($createdAccount | Measure-Object).count -eq 0) {
+                    Throw "Could not query created account after 15 seconds, where [$($correlationField)] = [$($correlationValue)]. Please wait a few minutes before trying again."
+                }
+
                 $outputContext.Data = $createdAccount
                 $outputContext.AccountReference = $createdAccount.Id
-            } else {
+            }
+            else {
                 Write-Information '[DryRun] Create and correlate KPN-Mobile-Services account, will be executed during enforcement'
             }
             $auditLogMessage = "Create account was successful. AccountReference is: [$($outputContext.AccountReference)]"
@@ -189,6 +211,11 @@ try {
             throw "Could not find costcenter with costcenterNumber [$($actionContext.Data.costCenterNumber)]"
             break
         }
+
+        "MultipleFound" {
+            throw "Multiple accounts found where [$($correlationField)] = [$($correlationValue)]. Please correct this so the persons are unique. Id's: [$($correlatedAccount.id -join ', ')]"
+            break
+        }
     }
 
     $outputContext.success = $true
@@ -197,7 +224,8 @@ try {
             Message = $auditLogMessage
             IsError = $false
         })
-} catch {
+}
+catch {
     $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -205,7 +233,8 @@ try {
         $errorObj = Resolve-KPN-Mobile-ServicesError -ErrorObject $ex
         $auditMessage = "Could not create or correlate KPN-Mobile-Services account. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditMessage = "Could not create or correlate KPN-Mobile-Services account. Error: $($ex.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }

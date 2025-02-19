@@ -23,7 +23,8 @@ function Resolve-KPN-Mobile-ServicesError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -36,12 +37,15 @@ function Resolve-KPN-Mobile-ServicesError {
             # Make sure to inspect the error result object and add only the error message as a FriendlyMessage.
             if ($errorDetailsObject.errors.count -gt 0) {
                 $httpErrorObj.FriendlyMessage = ($errorDetailsObject.errors -join ', ')
-            } elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
+            }
+            elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.fault.faultstring
-            } else {
+            }
+            else {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
             }
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
         }
         Write-Output $httpErrorObj
@@ -86,9 +90,12 @@ try {
 
     if ($null -ne $correlatedAccount) {
         $action = 'DeleteAccount'
-    } else {
+    }
+    else {
         $action = 'NotFound'
     }
+
+    Write-Information "Calculated action $action"
 
     # Process
     switch ($action) {
@@ -104,7 +111,8 @@ try {
             if (-not($actionContext.DryRun -eq $true)) {
                 Write-Information "Deleting KPN-Mobile-Services account with accountReference: [$($actionContext.References.Account)]"
                 $correlatedAccount = (Invoke-RestMethod @splatDeleteUser)
-            } else {
+            }
+            else {
                 Write-Information "[DryRun] Delete KPN-Mobile-Services account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
             }
 
@@ -126,7 +134,8 @@ try {
             break
         }
     }
-} catch {
+}
+catch {
     $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -134,7 +143,8 @@ try {
         $errorObj = Resolve-KPN-Mobile-ServicesError -ErrorObject $ex
         $auditMessage = "Could not delete KPN-Mobile-Services account. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditMessage = "Could not delete KPN-Mobile-Services account. Error: $($_.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }

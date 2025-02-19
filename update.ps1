@@ -23,7 +23,8 @@ function Resolve-KPN-Mobile-ServicesError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -36,12 +37,15 @@ function Resolve-KPN-Mobile-ServicesError {
             # Make sure to inspect the error result object and add only the error message as a FriendlyMessage.
             if ($errorDetailsObject.errors.count -gt 0) {
                 $httpErrorObj.FriendlyMessage = ($errorDetailsObject.errors -join ', ')
-            } elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
+            }
+            elseif (-not([string]::IsNullOrEmpty($errorDetailsObject.fault.faultstring))) {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.fault.faultstring
-            } else {
+            }
+            else {
                 $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
             }
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
         }
         Write-Output $httpErrorObj
@@ -91,23 +95,35 @@ try {
 
         $filteredCorrelatedAccount = $correlatedAccount | Select-Object * -ExcludeProperty path, id, location
 
+        $filteredCorrelatedAccount.PSObject.Properties | ForEach-Object {
+            if ($null -eq $_.Value) { 
+                $_.Value = "" 
+            }
+        }
+
+        $account = $actionContext.Data | Select-Object * -ExcludeProperty id, groupId, costCenterNumber, referenceNumber
+
+        $account.PSObject.Properties | ForEach-Object {
+            if ($null -eq $_.Value) { 
+                $_.Value = "" 
+            }
+        }
+
         $splatCompareProperties = @{
             ReferenceObject  = @($filteredCorrelatedAccount.PSObject.Properties)
-            DifferenceObject = @($actionContext.Data.subscriber.PSObject.Properties)
+            DifferenceObject = @($account.PSObject.Properties)
         }
-        $propertiesChangedObject = Compare-Object @splatCompareProperties -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
 
-        # Takes the subscriber model and adds all the properties that are populated in the target system and adds them to propertiesChanged.
-        # This is needed because the API sets properties to its default value when they are not send with the put request.
-        if ($null -ne $propertiesChangedObject) {
-            $propertiesChanged = @{}
-            $actionContext.Data.subscriber.PSObject.Properties | ForEach-Object { $propertiesChanged[$_.Name] = $_.Value }
+        $propertiesChanged = Compare-Object @splatCompareProperties -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
 
-            foreach ($property in $filteredCorrelatedAccount.PSObject.Properties) {
-                if (-not ($actionContext.Data.subscriber.PSObject.Properties.Name -contains ($property.Name))) {
-                    if (-not([string]::IsNullOrEmpty($property.Value))) {
-                        $propertiesChanged[$property.Name] = $property.Value
-                    }
+        if ($null -ne $propertiesChanged) {
+            $updateAccount = $filteredCorrelatedAccount
+            $updateAccount.PSObject.Properties | ForEach-Object {
+                if ($account.PSObject.Properties.Name -contains $_.Name) {
+                    $_.Value = $account.($_.Name)
+                }
+                elseif ([string]::IsNullOrEmpty($_.Value)) {
+                    $updateAccount.PSObject.Properties.Remove("$($_.Name)")
                 }
             }
         }
@@ -147,32 +163,47 @@ try {
 
         $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber }).id
         $targetCostCenterId = ($correlatedAccount.path | Where-Object { $_.type -eq 'COST_CENTER' }).id
-        $outputContext.PreviousData.costCenterNumber = ($costCenters | Where-Object { $_.id -eq $targetCostCenterId }).costcenterNumber
+        $previousDataCostCenter = ($costCenters | Where-Object { $_.id -eq $targetCostCenterId }).costcenterNumber
 
-        if ($actionContext.Data.groupId -ne $targetCostCenterId) {
-            $actionList += 'UpdateCostCenter'
+        # Returning data to HelloID
+        $outputContext.PreviousData | Add-Member -MemberType NoteProperty -Name 'costcenterNumber' -Value $previousDataCostCenter
+        $outputContext.PreviousData | Add-Member -MemberType NoteProperty -Name 'groupId' -Value $targetCostCenterId
+        $outputContext.Data.groupId = $actionContext.Data.groupId
+        $outputContext.Data.id = $correlatedAccount.id
+
+        if ($null -eq $actionContext.Data.groupId) {
+            $actionList += 'CostcenterValidationError'
         }
-        if ($propertiesChanged) {
-            $actionList += 'UpdateAccount'
-        } elseif ($actionContext.Data.groupId -eq $targetCostCenterId) {
-            $actionList += 'NoChanges'
+        else {
+            if ($actionContext.Data.groupId -ne $targetCostCenterId) {
+                $actionList += 'UpdateCostCenter'
+            }
+            if ($propertiesChanged) {
+                $actionList += 'UpdateAccount'
+            }
+            elseif ($actionContext.Data.groupId -eq $targetCostCenterId) {
+                $actionList += 'NoChanges'
+            }
         }
-    } else {
+    }
+    else {
         $actionList += 'NotFound'
     }
+
+    Write-Information "Calculated actions $($actionList -join ', ')"
 
     # Process
     foreach ($action in $actionList) {
         switch ($action) {
             'UpdateAccount' {
                 Write-Information "Account property(s) required to update: $($propertiesChanged.Name -join ', ')"
-
+                
                 $splatUpdateSubscriber = @{
                     Uri         = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers/$($actionContext.References.Account)"
                     Method      = 'PUT'
                     Body        = ([PSCustomObject]@{
                             referenceNumber = $actionContext.Data.referenceNumber
-                            subscriber      = $propertiesChanged
+                            subscriber      = $updateAccount
                         } | ConvertTo-Json -Depth 10)
                     Headers     = $headers
                     ContentType = 'application/json'
@@ -181,7 +212,8 @@ try {
                 if (-not($actionContext.DryRun -eq $true)) {
                     Write-Information "Updating KPN-Mobile-Services account with accountReference: [$($actionContext.References.Account)]"
                     $null = Invoke-RestMethod @splatUpdateSubscriber
-                } else {
+                }
+                else {
                     Write-Information "[DryRun] Update KPN-Mobile-Services account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
                 }
 
@@ -211,7 +243,8 @@ try {
                 if (-not($actionContext.DryRun -eq $true)) {
                     Write-Information "Move account from costcenter [$($targetCostCenterId)] to costcenter [$($actionContext.Data.groupId)]"
                     $null = Invoke-RestMethod @splatUpdateSubscriberCostCenter
-                } else {
+                }
+                else {
                     Write-Information "[DryRun] Move account from costcenter [$($targetCostCenterId)] to costcenter [$($actionContext.Data.groupId)], will be executed during enforcement"
                 }
 
@@ -225,12 +258,13 @@ try {
 
             'NoChanges' {
                 Write-Information "No changes to KPN-Mobile-Services account with accountReference: [$($actionContext.References.Account)]"
-
                 $outputContext.Success = $true
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Message = 'No changes will be made to the account during enforcement'
-                        IsError = $false
-                    })
+                $outputContext.PreviousData = $outputContext.Data
+                break
+            }
+
+            'CostcenterValidationError' {
+                throw "Could not find costcenter with costcenterNumber [$($actionContext.Data.costCenterNumber)]"
                 break
             }
 
@@ -245,7 +279,8 @@ try {
             }
         }
     }
-} catch {
+}
+catch {
     $outputContext.Success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -253,7 +288,8 @@ try {
         $errorObj = Resolve-KPN-Mobile-ServicesError -ErrorObject $ex
         $auditMessage = "Could not update KPN-Mobile-Services account. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditMessage = "Could not update KPN-Mobile-Services account. Error: $($ex.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
