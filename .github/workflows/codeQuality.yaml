@@ -1,0 +1,67 @@
+name: PowerShell Code Quality
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  pull-requests: write  # ✅ Grant permission to post comments on PRs
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        id: analyze
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning,Error
+          if ($results) {
+            $jsonResults = $results | ConvertTo-Json -Depth 10 -Compress
+            $jsonResults | Out-File PSScriptAnalyzerResults.json
+            echo "Issues found:"
+            cat PSScriptAnalyzerResults.json
+            echo "::set-output name=issues::$jsonResults"
+          } else {
+            echo "::set-output name=issues::[]"
+          }
+
+      - name: Post PR Comment with Analysis Results
+        if: success() || failure()
+        uses: actions/github-script@v7
+        env:
+          ISSUES: ${{ steps.analyze.outputs.issues }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { ISSUES } = process.env;
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo;
+
+            let message = "### PowerShell Code Quality Report 🚀\n\n";
+            try {
+              const results = JSON.parse(ISSUES);
+              if (results.length > 0) {
+                results.forEach(issue => {
+                  message += `- ❌ **${issue.RuleName}** (Severity: ${issue.Severity})\n  - ${issue.Message}\n  - File: \`${issue.ScriptPath}:${issue.Line}\`\n\n`;
+                });
+              } else {
+                message += "✅ No issues found! 🎉";
+              }
+            } catch (error) {
+              message += "⚠️ Error parsing JSON output. Please check the logs.";
+            }
+
+            github.rest.issues.createComment({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber,
+              body: message
+            });
