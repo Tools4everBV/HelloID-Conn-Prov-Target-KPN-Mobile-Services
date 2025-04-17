@@ -132,7 +132,7 @@ try {
                 $costCenters += $costCenterObject
             }
         }
-
+        $actionContext.Data | Add-Member -NotePropertyName groupId -NotePropertyValue $null -Force
         $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber } | Select-Object -ExpandProperty id)
     }
 

@@ -161,6 +161,7 @@ try {
             }
         }
 
+        $actionContext.Data | Add-Member -NotePropertyName groupId -NotePropertyValue $null -Force
         $actionContext.Data.groupId = ($costCenters | Where-Object { $_.costcenterNumber -eq $actionContext.Data.costCenterNumber }).id
         $targetCostCenterId = ($correlatedAccount.path | Where-Object { $_.type -eq 'COST_CENTER' }).id
         $previousDataCostCenter = ($costCenters | Where-Object { $_.id -eq $targetCostCenterId }).costcenterNumber
