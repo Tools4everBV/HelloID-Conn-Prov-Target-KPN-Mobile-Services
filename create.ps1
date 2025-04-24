@@ -89,14 +89,21 @@ try {
             throw 'Correlation is enabled but [accountFieldValue] is empty. Please make sure it is correctly mapped'
         }
 
+        $splatTotalUsers = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($correlationValue)`"&from=0&to=1"
+            Method  = 'GET'
+            Headers = $headers
+        }
+        $totalUsers = (Invoke-RestMethod @splatTotalUsers).total
+
         $splatGetUsers = @{
-            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($correlationValue)`""
+            Uri     = "$($actionContext.Configuration.BaseUrl)/mobile/kpn/mobileservices/hierarchy/subscribers?filters=EMPLOYEE_NUMBER:`"$($correlationValue)`"&from=0&to=$($totalUsers)"
             Method  = 'GET'
             Headers = $headers
         }
         $correlatedAccount = (Invoke-RestMethod @splatGetUsers).result
- 
-        $correlatedAccount = $correlatedAccount | Where-Object { $_.$correlationField -eq $correlationValue }
+       
+        $correlatedAccount = $correlatedAccount | Where-Object { $_.$correlationField -eq "$correlationValue" }
 
         # Validate costcenter number to costcenter id in KPN-mobile-services
         $splatGetDebtors = @{
