@@ -136,8 +136,8 @@ try {
     }
 }
 catch {
-    $outputContext.success = $false
     $ex = $PSItem
+
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-KPN-Mobile-ServicesError -ErrorObject $ex
@@ -148,8 +148,19 @@ catch {
         $auditMessage = "Could not delete KPN-Mobile-Services account. Error: $($_.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
-    $outputContext.AuditLogs.Add([PSCustomObject]@{
-            Message = $auditMessage
-            IsError = $true
-        })
+
+    if ($ex -like '*"VIRTUAL_HIERARCHY_ITEM_NOT_FOUND"*') {
+        $outputContext.Success = $true
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                # Action  = "" # Optional
+                Message = "Skipped Delete. Reason: User is already removed from KPN."
+                IsError = $false
+            })
+    } else {
+        $outputContext.success = $false
+        $outputContext.AuditLogs.Add([PSCustomObject]@{
+                Message = $auditMessage
+                IsError = $true
+            })
+    }
 }
